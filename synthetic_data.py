@@ -71,12 +71,14 @@ class SyntheticDataGenerator:
         
         print(f"Data shape: {self.keypoints.shape}, Labels shape: {self.labels.shape}")
         
-        # Separate fall and normal sequences
-        self.fall_keypoints = self.keypoints[self.labels == 1]
-        self.normal_keypoints = self.keypoints[self.labels == 0]
+        # Separate sequences by class
+        self.stand_keypoints = self.keypoints[self.labels == 0]
+        self.walk_keypoints = self.keypoints[self.labels == 1] 
+        self.fall_keypoints = self.keypoints[self.labels == 2]
         
+        print(f"Stand sequences: {self.stand_keypoints.shape}")
+        print(f"Walk sequences: {self.walk_keypoints.shape}")
         print(f"Fall sequences: {self.fall_keypoints.shape}")
-        print(f"Normal sequences: {self.normal_keypoints.shape}")
     
     def visualize_skeleton_static(self, keypoints_seq, frame_idx, title, save_name):
         """Visualize a single frame of skeleton keypoints."""
@@ -115,40 +117,38 @@ class SyntheticDataGenerator:
         plt.close()
         print(f"Multi-frame visualization saved to: {save_path}")
     
-    def prepare_data_loaders(self, batch_size=16):
-        """Prepare data loaders for training."""
-        # Get dimensions
-        self.num_sequences_fall, self.num_frames_fall, self.num_keypoints_fall = self.fall_keypoints.shape
-        self.num_sequences_normal, self.num_frames_normal, self.num_keypoints_normal = self.normal_keypoints.shape
+    def prepare_data_loaders_for_class(self, keypoints_data, batch_size=16):
+        """Prepare data loader for a specific class."""
+        if len(keypoints_data) == 0:
+            return None, None, None
+        
+        num_sequences, num_frames, num_keypoints = keypoints_data.shape
         
         # Flatten sequences
-        fall_keypoints_flattened = self.fall_keypoints.reshape(
-            self.num_sequences_fall, self.num_frames_fall * self.num_keypoints_fall
-        )
-        normal_keypoints_flattened = self.normal_keypoints.reshape(
-            self.num_sequences_normal, self.num_frames_normal * self.num_keypoints_normal
+        keypoints_flattened = keypoints_data.reshape(
+            num_sequences, num_frames * num_keypoints
         )
         
-        print(f"Flattened shapes - Fall: {fall_keypoints_flattened.shape}, Normal: {normal_keypoints_flattened.shape}")
+        print(f"Flattened shape: {keypoints_flattened.shape}")
         
         # Convert to PyTorch tensors
-        fall_tensor = torch.tensor(fall_keypoints_flattened, dtype=torch.float32)
-        normal_tensor = torch.tensor(normal_keypoints_flattened, dtype=torch.float32)
+        tensor = torch.tensor(keypoints_flattened, dtype=torch.float32)
         
-        # Create datasets and loaders
-        fall_dataset = TensorDataset(fall_tensor)
-        normal_dataset = TensorDataset(normal_tensor)
+        # Create dataset and loader
+        dataset = TensorDataset(tensor)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         
-        self.fall_loader = DataLoader(fall_dataset, batch_size=batch_size, shuffle=True)
-        self.normal_loader = DataLoader(normal_dataset, batch_size=batch_size, shuffle=True)
-        
-        # Set input dimensions
-        self.input_dim_fall = self.num_frames_fall * self.num_keypoints_fall
-        self.input_dim_normal = self.num_frames_normal * self.num_keypoints_normal
+        # Return loader and dimensions
+        input_dim = num_frames * num_keypoints
+        return loader, input_dim, (num_frames, num_keypoints)
     
     def train_vae_model(self, data_loader, input_dim, model_name, num_epochs=2000, 
                        hidden_dim=256, latent_dim=64, learning_rate=1e-3):
         """Train VAE model on given data."""
+        if data_loader is None:
+            print(f"No data available for {model_name}, skipping...")
+            return None, []
+            
         print(f"\nTraining VAE model: {model_name}")
         print(f"Input dim: {input_dim}, Hidden dim: {hidden_dim}, Latent dim: {latent_dim}")
         
@@ -210,9 +210,15 @@ class SyntheticDataGenerator:
         print(f"Training loss plot saved to: {save_path}")
     
     def generate_and_visualize_synthetic_data(self, model, num_samples, latent_dim, 
-                                            num_frames, num_keypoints, data_type):
+                                            shape_info, data_type):
         """Generate synthetic data and visualize samples."""
+        if model is None:
+            print(f"No model available for {data_type}, skipping generation...")
+            return None
+            
         print(f"\nGenerating {num_samples} synthetic {data_type} sequences...")
+        
+        num_frames, num_keypoints = shape_info
         
         # Generate synthetic data
         synthetic_data = generate_synthetic_data(model, num_samples, latent_dim, self.device)
@@ -233,28 +239,54 @@ class SyntheticDataGenerator:
         
         return synthetic_sequences
     
-    def create_augmented_dataset(self, synthetic_fall_data, synthetic_normal_data):
+    def create_augmented_dataset(self, synthetic_stand_data=None, synthetic_walk_data=None, 
+                               synthetic_fall_data=None):
         """Create augmented dataset combining real and synthetic data."""
         print("\nCreating augmented dataset...")
         
-        # Combine all keypoints
-        all_keypoints = np.concatenate([
-            self.fall_keypoints, 
-            self.normal_keypoints, 
-            synthetic_fall_data, 
-            synthetic_normal_data
-        ])
+        # Start with original data
+        all_keypoints_list = []
+        all_labels_list = []
         
-        # Create labels
-        all_labels = np.concatenate([
-            np.ones(self.fall_keypoints.shape[0] + synthetic_fall_data.shape[0]),  # Falls = 1
-            np.zeros(self.normal_keypoints.shape[0] + synthetic_normal_data.shape[0])  # Normal = 0
-        ])
+        # Add original data
+        if len(self.stand_keypoints) > 0:
+            all_keypoints_list.append(self.stand_keypoints)
+            all_labels_list.append(np.zeros(self.stand_keypoints.shape[0]))
+        
+        if len(self.walk_keypoints) > 0:
+            all_keypoints_list.append(self.walk_keypoints)
+            all_labels_list.append(np.ones(self.walk_keypoints.shape[0]))
+        
+        if len(self.fall_keypoints) > 0:
+            all_keypoints_list.append(self.fall_keypoints)
+            all_labels_list.append(np.full(self.fall_keypoints.shape[0], 2))
+        
+        # Add synthetic data if available
+        if synthetic_stand_data is not None:
+            all_keypoints_list.append(synthetic_stand_data)
+            all_labels_list.append(np.zeros(synthetic_stand_data.shape[0]))
+        
+        if synthetic_walk_data is not None:
+            all_keypoints_list.append(synthetic_walk_data)
+            all_labels_list.append(np.ones(synthetic_walk_data.shape[0]))
+        
+        if synthetic_fall_data is not None:
+            all_keypoints_list.append(synthetic_fall_data)
+            all_labels_list.append(np.full(synthetic_fall_data.shape[0], 2))
+        
+        # Combine all data
+        if all_keypoints_list:
+            all_keypoints = np.concatenate(all_keypoints_list, axis=0)
+            all_labels = np.concatenate(all_labels_list, axis=0)
+        else:
+            print("No data to combine!")
+            return None, None
         
         print(f"Augmented dataset shape: {all_keypoints.shape}")
         print(f"Augmented labels shape: {all_labels.shape}")
-        print(f"Total fall sequences: {np.sum(all_labels == 1)}")
-        print(f"Total normal sequences: {np.sum(all_labels == 0)}")
+        print(f"Total stand sequences: {np.sum(all_labels == 0)}")
+        print(f"Total walk sequences: {np.sum(all_labels == 1)}")
+        print(f"Total fall sequences: {np.sum(all_labels == 2)}")
         
         # Save augmented data
         keypoints_path = os.path.join(self.augmentation_dir, 'keypoints_sequences_vae.npy')
@@ -270,19 +302,30 @@ class SyntheticDataGenerator:
     
     def plot_data_distribution(self, original_labels, augmented_labels):
         """Plot data distribution comparison."""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+        
+        class_names = ['Stand', 'Walk', 'Fall']
+        colors = ['green', 'blue', 'red']
         
         # Original data distribution
-        original_counts = np.bincount(original_labels.astype(int))
-        ax1.bar(['Normal', 'Fall'], original_counts, color=['blue', 'red'], alpha=0.7)
+        original_counts = np.bincount(original_labels.astype(int), minlength=3)
+        ax1.bar(class_names, original_counts, color=colors, alpha=0.7)
         ax1.set_title('Original Data Distribution')
         ax1.set_ylabel('Number of Sequences')
         
+        # Add value labels on bars
+        for i, v in enumerate(original_counts):
+            ax1.text(i, v + 0.5, str(v), ha='center', va='bottom')
+        
         # Augmented data distribution
-        augmented_counts = np.bincount(augmented_labels.astype(int))
-        ax2.bar(['Normal', 'Fall'], augmented_counts, color=['blue', 'red'], alpha=0.7)
+        augmented_counts = np.bincount(augmented_labels.astype(int), minlength=3)
+        ax2.bar(class_names, augmented_counts, color=colors, alpha=0.7)
         ax2.set_title('Augmented Data Distribution')
         ax2.set_ylabel('Number of Sequences')
+        
+        # Add value labels on bars
+        for i, v in enumerate(augmented_counts):
+            ax2.text(i, v + 0.5, str(v), ha='center', va='bottom')
         
         plt.tight_layout()
         save_path = os.path.join(self.plots_dir, 'data_distribution.png')
@@ -299,59 +342,53 @@ class SyntheticDataGenerator:
         print("\n1. Visualizing original data samples...")
         if len(self.fall_keypoints) > 0:
             self.visualize_sequence_frames(self.fall_keypoints[0], 'original_fall', num_frames=5)
-        if len(self.normal_keypoints) > 0:
-            self.visualize_sequence_frames(self.normal_keypoints[0], 'original_normal', num_frames=5)
+        if len(self.stand_keypoints) > 0:
+            self.visualize_sequence_frames(self.stand_keypoints[0], 'original_stand', num_frames=5)
+        if len(self.walk_keypoints) > 0:
+            self.visualize_sequence_frames(self.walk_keypoints[0], 'original_walk', num_frames=5)
         
-        # 2. Prepare data loaders
+        # 2. Prepare data loaders for each class
         print("\n2. Preparing data loaders...")
-        self.prepare_data_loaders(batch_size=16)
+        stand_loader, stand_input_dim, stand_shape = self.prepare_data_loaders_for_class(
+            self.stand_keypoints, batch_size=16)
+        walk_loader, walk_input_dim, walk_shape = self.prepare_data_loaders_for_class(
+            self.walk_keypoints, batch_size=16)
+        fall_loader, fall_input_dim, fall_shape = self.prepare_data_loaders_for_class(
+            self.fall_keypoints, batch_size=16)
         
-        # 3. Train VAE on fall sequences
-        print("\n3. Training VAE on fall sequences...")
-        fall_model, fall_losses = self.train_vae_model(
-            self.fall_loader, 
-            self.input_dim_fall, 
-            'vae_fall_model',
-            num_epochs=num_epochs
-        )
+        # 3. Train VAE models for each class
+        synthetic_stand_data = None
+        synthetic_walk_data = None
+        synthetic_fall_data = None
         
-        # 4. Generate synthetic fall data
-        synthetic_fall_data = self.generate_and_visualize_synthetic_data(
-            fall_model, 
-            num_synthetic_samples, 
-            64,  # latent_dim
-            self.num_frames_fall, 
-            self.num_keypoints_fall,
-            'fall'
-        )
+        if stand_loader is not None:
+            print("\n3a. Training VAE on stand sequences...")
+            stand_model, _ = self.train_vae_model(
+                stand_loader, stand_input_dim, 'vae_stand_model', num_epochs=num_epochs)
+            synthetic_stand_data = self.generate_and_visualize_synthetic_data(
+                stand_model, num_synthetic_samples, 64, stand_shape, 'stand')
         
-        # 5. Train VAE on normal sequences
-        print("\n5. Training VAE on normal sequences...")
-        normal_model, normal_losses = self.train_vae_model(
-            self.normal_loader, 
-            self.input_dim_normal, 
-            'vae_normal_model',
-            num_epochs=num_epochs
-        )
+        if walk_loader is not None:
+            print("\n3b. Training VAE on walk sequences...")
+            walk_model, _ = self.train_vae_model(
+                walk_loader, walk_input_dim, 'vae_walk_model', num_epochs=num_epochs)
+            synthetic_walk_data = self.generate_and_visualize_synthetic_data(
+                walk_model, num_synthetic_samples, 64, walk_shape, 'walk')
         
-        # 6. Generate synthetic normal data
-        synthetic_normal_data = self.generate_and_visualize_synthetic_data(
-            normal_model, 
-            num_synthetic_samples, 
-            64,  # latent_dim
-            self.num_frames_normal, 
-            self.num_keypoints_normal,
-            'normal'
-        )
+        if fall_loader is not None:
+            print("\n3c. Training VAE on fall sequences...")
+            fall_model, _ = self.train_vae_model(
+                fall_loader, fall_input_dim, 'vae_fall_model', num_epochs=num_epochs)
+            synthetic_fall_data = self.generate_and_visualize_synthetic_data(
+                fall_model, num_synthetic_samples, 64, fall_shape, 'fall')
         
-        # 7. Create augmented dataset
+        # 4. Create augmented dataset
         all_keypoints, all_labels = self.create_augmented_dataset(
-            synthetic_fall_data, 
-            synthetic_normal_data
-        )
+            synthetic_stand_data, synthetic_walk_data, synthetic_fall_data)
         
-        # 8. Plot data distribution comparison
-        self.plot_data_distribution(self.labels, all_labels)
+        # 5. Plot data distribution comparison
+        if all_keypoints is not None and all_labels is not None:
+            self.plot_data_distribution(self.labels, all_labels)
         
         print("\n" + "=" * 60)
         print("Synthetic data generation completed!")
@@ -362,12 +399,33 @@ class SyntheticDataGenerator:
 
 def main():
     """Main function to run the synthetic data generation pipeline."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Generate synthetic pose data using VAE')
+    parser.add_argument('--input-dir', type=str, default='output/data',
+                       help='Input directory containing keypoints data')
+    parser.add_argument('--output-dir', type=str, default='data/augmentation',
+                       help='Output directory for augmented data')
+    parser.add_argument('--num-epochs', type=int, default=2000,
+                       help='Number of training epochs for VAE')
+    parser.add_argument('--num-synthetic', type=int, default=200,
+                       help='Number of synthetic samples to generate per class')
+    
+    args = parser.parse_args()
+    
     try:
         # Initialize generator
-        generator = SyntheticDataGenerator()
+        generator = SyntheticDataGenerator(data_path=args.input_dir)
+        
+        # Update output directory
+        generator.augmentation_dir = args.output_dir
+        os.makedirs(args.output_dir, exist_ok=True)
         
         # Run the complete pipeline
-        generator.run_pipeline(num_epochs=2000, num_synthetic_samples=200)
+        generator.run_pipeline(
+            num_epochs=args.num_epochs, 
+            num_synthetic_samples=args.num_synthetic
+        )
         
     except Exception as e:
         print(f"Error in synthetic data generation: {e}")

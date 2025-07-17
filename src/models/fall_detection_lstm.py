@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class FallDetectionLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, output_size, dropout_prob=0.5):
+    def __init__(self, input_size, hidden_size, num_layers, output_size=3, dropout_prob=0.5):  # 修改默认输出为3
         super(FallDetectionLSTM, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -23,7 +23,7 @@ class FallDetectionLSTM(nn.Module):
         
         # Función de activación
         self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax(dim=1)  # 修改为Softmax用于多分类
         
         # Inicialización de pesos
         self._init_weights()
@@ -68,6 +68,6 @@ class FallDetectionLSTM(nn.Module):
         
         out = self.fc3(out)
         
-        # Aplicar sigmoide para obtener probabilidades
-        out = self.sigmoid(out)
+        # Aplicar softmax para obtener probabilidades de cada clase
+        out = self.softmax(out)
         return out

@@ -332,7 +332,7 @@ class PoseDataExtractor:
                 
                 try:
                     keypoints = extract_keypoints_from_video(video_path, self.model, 
-                                                           sequence_length=sequence_length)
+                                                        sequence_length=sequence_length)
                     keypoints_sequences.append(keypoints)
                     labels.append(label)
                 except Exception as e:
@@ -376,6 +376,12 @@ class PoseDataExtractor:
         print(f"Processed sequences saved to: {sequences_path}")
         print(f"Labels saved to: {labels_path}")
         print(f"Data range: [{keypoints_sequences_normalized.min():.3f}, {keypoints_sequences_normalized.max():.3f}]")
+        
+        # 打印标签分布
+        unique, counts = np.unique(labels, return_counts=True)
+        label_names = {0: 'stand', 1: 'walk', 2: 'fall'}
+        for label, count in zip(unique, counts):
+            print(f"{label_names.get(label, f'label_{label}')} sequences: {count}")
         
         return keypoints_sequences_normalized, labels
 
@@ -438,9 +444,9 @@ def main():
     # 4. Process entire dataset
     print("\n4. Processing entire dataset...")
     video_folders = {
-        'data/videos/falls': 1,           # Fall videos -> label 1
-        'data/videos/normal': 0,          # Normal videos -> label 0
-        'data/videos/no_fall_static': 0   # Static no-fall videos -> label 0
+        'data/videos/fall': 2,           # Fall videos -> label 2
+        'data/videos/walk': 1,           # Walk videos -> label 1  
+        'data/videos/stand': 0           # Stand videos -> label 0
     }
     
     try:
@@ -449,8 +455,9 @@ def main():
         if sequences is not None:
             print(f"\nDataset processing completed!")
             print(f"Total sequences: {len(sequences)}")
-            print(f"Fall sequences: {np.sum(labels == 1)}")
-            print(f"Normal sequences: {np.sum(labels == 0)}")
+            print(f"Stand sequences: {np.sum(labels == 0)}")
+            print(f"Walk sequences: {np.sum(labels == 1)}")
+            print(f"Fall sequences: {np.sum(labels == 2)}")
         else:
             print("\nNo sequences were processed successfully.")
     except Exception as e:
