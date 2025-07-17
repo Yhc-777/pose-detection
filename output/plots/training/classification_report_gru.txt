@@ -1,0 +1,12 @@
+Model: gru
+
+Classification Report:
+              precision    recall  f1-score   support
+
+       Stand       1.00      0.76      0.86        41
+        Walk       0.83      1.00      0.91        49
+        Fall       1.00      1.00      1.00        49
+
+    accuracy                           0.93       139
+   macro avg       0.94      0.92      0.92       139
+weighted avg       0.94      0.93      0.93       139

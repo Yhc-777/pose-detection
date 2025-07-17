@@ -5,7 +5,7 @@ import torch.optim as optim
 def train_model(model, train_loader, val_loader, num_epochs=200, learning_rate=0.0001, 
                 weight_decay=1e-4, patience=10, device="cuda" if torch.cuda.is_available() else "cpu"):
     """
-    Entrena un modelo de detección de caídas usando LSTM o GRU.
+    Entrena un modelo de detección de actividades usando LSTM o GRU.
 
     Args:
         model (torch.nn.Module): Modelo a entrenar.
@@ -22,7 +22,7 @@ def train_model(model, train_loader, val_loader, num_epochs=200, learning_rate=0
         history: Diccionario con métricas de entrenamiento y validación.
     """
     model.to(device)
-    criterion = nn.BCELoss()  # Binary Cross Entropy Loss
+    criterion = nn.CrossEntropyLoss()  # 修改为CrossEntropyLoss用于多分类
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Listas para almacenar métricas
@@ -37,17 +37,17 @@ def train_model(model, train_loader, val_loader, num_epochs=200, learning_rate=0
         train_loss, correct, total = 0, 0, 0
 
         for batch_X, batch_y in train_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device).long()  # 转换为long类型
 
             optimizer.zero_grad()
-            outputs = model(batch_X).squeeze()
+            outputs = model(batch_X)
             loss = criterion(outputs, batch_y)
 
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item()
-            predicted = (outputs >= 0.5).float()
+            predicted = torch.argmax(outputs, dim=1)  # 获取最大概率的类别
             correct += (predicted == batch_y).sum().item()
             total += batch_y.size(0)
 
@@ -62,13 +62,13 @@ def train_model(model, train_loader, val_loader, num_epochs=200, learning_rate=0
 
         with torch.no_grad():
             for batch_X, batch_y in val_loader:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device).long()
 
-                outputs = model(batch_X).squeeze()
+                outputs = model(batch_X)
                 loss = criterion(outputs, batch_y)
                 val_loss += loss.item()
 
-                predicted = (outputs >= 0.5).float()
+                predicted = torch.argmax(outputs, dim=1)
                 correct += (predicted == batch_y).sum().item()
                 total += batch_y.size(0)
 

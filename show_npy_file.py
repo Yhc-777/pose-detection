@@ -32,3 +32,20 @@ labels = np.load('output/data/labels.npy')
 print(f"标签形状: {labels.shape}")
 print(f"数据类型: {labels.dtype}")
 print(f"唯一值: {np.unique(labels)}")
+
+
+
+
+
+
+# 添加这部分来查看第一个视频序列对应的标签
+print(f"\n第一个视频序列对应的标签: {labels[0]}")
+
+# 创建标签映射字典来显示标签含义
+label_mapping = {0: 'stand', 1: 'walk', 2: 'fall'}
+print(f"第一个视频序列的动作类型: {label_mapping[labels[0]]}")
+
+# 可以进一步查看更多视频序列的标签
+print(f"\n前10个视频序列的标签和动作类型:")
+for i in range(min(10, len(labels))):
+    print(f"视频 {i}: 标签={labels[i]}, 动作={label_mapping[labels[i]]}")
